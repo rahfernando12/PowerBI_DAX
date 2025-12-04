@@ -1,3 +1,7 @@
+-- The code assumes caluclations exist for [total revenue] and [Total revenu YoY change %]
+-- SvgIconPlaceholder can be changed to any SVG
+--
+
 Total Revenue SVG KPI = 
 VAR KPIVLU =
 SWITCH(
@@ -112,3 +116,4 @@ RETURN
     SvgKpiLabel &
     SvgYoYGroup &
     SvgFooter
+
