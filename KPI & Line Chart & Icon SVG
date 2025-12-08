@@ -1,0 +1,325 @@
+-- SVG KPI and Line chart visual with an icon
+
+SVG KPI + Line Chart = 
+-------------------------------------------------
+-- KPI value + YoY text
+-------------------------------------------------
+VAR KPIVLU =
+    SWITCH (
+        TRUE (),
+        ABS ( [Total Revenue] ) >= 1000000000, FORMAT ( [Total Revenue] / 1000000000, "£0.0""B""" ),
+        ABS ( [Total Revenue] ) >= 1000000,    FORMAT ( [Total Revenue] / 1000000,    "£0.0""M""" ),
+        ABS ( [Total Revenue] ) >= 1000,       FORMAT ( [Total Revenue] / 1000,       "£0""K""" ),
+        FORMAT ( [Total Revenue], "£#,0" )
+    )
+
+VAR KpiLabel = "Total Revenue"
+
+VAR YoYValue = [Total Revenue YoY Change %]
+
+VAR YoYFormattedRaw =
+    IF ( NOT ISBLANK ( YoYValue ), FORMAT ( YoYValue, "0.0%" ), "N/A" )
+
+VAR YoYLabelText =
+    IF (
+        ISBLANK ( YoYValue ),
+        "vs LY: N/A",
+        "vs LY: "
+            & IF ( YoYValue >= 0, "+" & YoYFormattedRaw, YoYFormattedRaw )
+    )
+
+-------------------------------------------------
+-- Layout constants: card size + padding
+-------------------------------------------------
+VAR CardWidth  = 300
+VAR CardHeight = 180
+VAR Padding    = 15
+
+VAR ContentLeft    = Padding
+VAR ContentRight   = CardWidth - Padding
+VAR ContentTop     = Padding
+VAR ContentBottom  = CardHeight - Padding
+VAR ContentCenterY = ( ContentTop + ContentBottom ) / 2.0
+
+-------------------------------------------------
+-- Icon + text layout
+-------------------------------------------------
+VAR IconScale = 0.06
+
+-- Icon origin for transform (approx centre vertically)
+VAR IconPosX = ContentLeft + 10
+VAR IconPosY = ContentCenterY +30
+
+-- Reserve space for icon + gap before text
+VAR IconApproxWidth = 60
+VAR TextGap         = 15
+
+VAR TextBlockX = IconPosX + IconApproxWidth + TextGap
+
+-- Text vertical positions
+VAR KPIVLUY   = ContentTop + 40   -- KPI value
+VAR KpiLabelY = ContentTop + 72   -- label
+VAR YoYBaseY  = ContentTop + 104  -- YoY group baseline
+
+-------------------------------------------------
+-- Line chart layout (fits fully below YoY, within padding)
+-------------------------------------------------
+VAR ChartTop    = YoYBaseY + 20      -- some space under YoY
+VAR ChartBottom = ContentBottom
+VAR ChartLeft   = TextBlockX
+VAR ChartRight  = ContentRight
+
+-------------------------------------------------
+-- Colours
+-------------------------------------------------
+VAR BgColor            = "#FFFFFF"
+VAR BorderColor        = "#E2E8F0"
+VAR TextPrimaryColor   = "#1A202C"
+VAR TextSecondaryColor = "#4A5568"
+VAR TextYoYColor       = "#2D3748"
+VAR ArrowUpColor       = "#38A169"
+VAR ArrowDownColor     = "#E53E3E"
+VAR ArrowNeutralColor  = "#A0AEC0"
+VAR LineColor          = "#3182CE"
+VAR MinColor           = "#E53E3E"
+VAR MaxColor           = "#38A169"
+
+VAR IsPositive = YoYValue > 0
+VAR IsNegative = YoYValue < 0
+
+VAR ArrowColor =
+    IF (
+        ISBLANK ( YoYValue ),
+        ArrowNeutralColor,
+        IF ( IsPositive, ArrowUpColor, ArrowDownColor )
+    )
+
+-- Arrow points (relative to YoY group origin)
+VAR ArrowPointsUp   = "0,0 10,-12 20,0"
+VAR ArrowPointsDown = "0,-12 10,0 20,-12"
+VAR ArrowPoints =
+    IF ( IsNegative, ArrowPointsDown, ArrowPointsUp )
+
+-------------------------------------------------
+-- Build dynamic line chart (last 12 months)
+-------------------------------------------------
+VAR LD2 =
+    MAX ( Dim_Date[Date] )
+
+VAR Last12MonthsDatesRaw =
+    CALCULATETABLE (
+        VALUES ( Dim_Date[Date] ),
+        DATESINPERIOD ( Dim_Date[Date], LD2, -11, MONTH )
+    )
+
+-- Only keep dates where [Total Revenue] is not blank
+VAR DateTableVisible =
+    FILTER (
+        Last12MonthsDatesRaw,
+        NOT ISBLANK ( [Total Revenue] )
+    )
+
+VAR PointsBase =
+    ADDCOLUMNS (
+        DateTableVisible,
+        "Idx",   RANKX ( DateTableVisible, Dim_Date[Date], , ASC ),
+        "Value", [Total Revenue]
+    )
+
+VAR PointCount =
+    COUNTROWS ( PointsBase )
+
+VAR HasNoData = PointCount = 0
+
+VAR PointsWithX =
+    ADDCOLUMNS (
+        PointsBase,
+        "XCoord",
+            VAR idx = [Idx]
+            RETURN
+                ChartLeft
+                    + ( ChartRight - ChartLeft )
+                        * ( idx - 1 )
+                        / MAX ( 1, PointCount - 1 )
+    )
+
+VAR MinVal =
+    MINX ( PointsWithX, [Value] )
+
+VAR MaxVal =
+    MAXX ( PointsWithX, [Value] )
+
+VAR PointsFinal =
+    ADDCOLUMNS (
+        PointsWithX,
+        "YCoord",
+            VAR v = [Value]
+            RETURN
+                IF (
+                    MaxVal = MinVal
+                        || MaxVal = BLANK ()
+                        || MinVal = BLANK (),
+                    ( ChartTop + ChartBottom ) / 2.0,
+                    ChartBottom
+                        - ( ( v - MinVal ) / ( MaxVal - MinVal ) )
+                            * ( ChartBottom - ChartTop )
+                )
+    )
+
+-------------------------------------------------
+-- Build line path
+-------------------------------------------------
+VAR PathBody =
+    IF (
+        HasNoData || PointCount < 2,
+        BLANK (),
+        CONCATENATEX (
+            PointsFinal,
+            VAR idx = [Idx]
+            VAR x   = [XCoord]
+            VAR y   = [YCoord]
+            RETURN
+                IF (
+                    idx = 1,
+                    "M " & FORMAT ( x, "0.0" ) & " " & FORMAT ( y, "0.0" ),
+                    " L " & FORMAT ( x, "0.0" ) & " " & FORMAT ( y, "0.0" )
+                ),
+            "",
+            [Idx],
+            ASC
+        )
+    )
+
+VAR SvgLinePath =
+    IF (
+        PathBody = BLANK (),
+        "",
+        "<path d=""" & PathBody
+            & """ fill=""none"" stroke=""" & LineColor
+            & """ stroke-width=""2.0"" stroke-linecap=""round"" stroke-linejoin=""round"" />"
+    )
+
+-------------------------------------------------
+-- Point markers: blue for all, red for min, green for max
+-------------------------------------------------
+VAR SvgAllPoints =
+    IF (
+        HasNoData,
+        "",
+        CONCATENATEX (
+            PointsFinal,
+            "<circle cx=""" & FORMAT ( [XCoord], "0.0" )
+                & """ cy=""" & FORMAT ( [YCoord], "0.0" )
+                & """ r=""3"" fill=""" & LineColor
+                & """ stroke=""" & LineColor & """ stroke-width=""1"" />",
+            ""
+        )
+    )
+
+-- Min point
+VAR MinPointTable =
+    FILTER ( PointsFinal, NOT ISBLANK ( [Value] ) && [Value] = MinVal )
+
+VAR MinIdx =
+    MINX ( MinPointTable, [Idx] )
+
+VAR _MinX =
+    MAXX ( FILTER ( PointsFinal, [Idx] = MinIdx ), [XCoord] )
+
+VAR MinY =
+    MAXX ( FILTER ( PointsFinal, [Idx] = MinIdx ), [YCoord] )
+
+VAR SvgMinPoint =
+    IF (
+        HasNoData,
+        "",
+        "<circle cx=""" & FORMAT ( _MinX, "0.0" )
+            & """ cy=""" & FORMAT ( MinY, "0.0" )
+            & """ r=""4"" fill=""" & MinColor
+            & """ stroke=""" & MinColor & """ stroke-width=""1"" />"
+    )
+
+-- Max point
+VAR MaxPointTable =
+    FILTER ( PointsFinal, NOT ISBLANK ( [Value] ) && [Value] = MaxVal )
+
+VAR MaxIdx =
+    MINX ( MaxPointTable, [Idx] )
+
+VAR _MaxX =
+    MAXX ( FILTER ( PointsFinal, [Idx] = MaxIdx ), [XCoord] )
+
+VAR MaxY =
+    MAXX ( FILTER ( PointsFinal, [Idx] = MaxIdx ), [YCoord] )
+
+VAR SvgMaxPoint =
+    IF (
+        HasNoData,
+        "",
+        "<circle cx=""" & FORMAT ( _MaxX, "0.0" )
+            & """ cy=""" & FORMAT ( MaxY, "0.0" )
+            & """ r=""4"" fill=""" & MaxColor
+            & """ stroke=""" & MaxColor & """ stroke-width=""1"" />"
+    )
+
+VAR SvgLineChart =
+    SvgLinePath & SvgAllPoints & SvgMinPoint & SvgMaxPoint
+
+-------------------------------------------------
+-- SVG header + background
+-------------------------------------------------
+VAR SvgHeader =
+    "data:image/svg+xml;utf8,"
+        & "<svg width=""" & CardWidth & """ height=""" & CardHeight
+        & """ viewBox=""0 0 " & CardWidth & " " & CardHeight
+        & """ xmlns=""http://www.w3.org/2000/svg"">"
+
+VAR SvgBackground =
+    "<rect x=""0"" y=""0"" width=""" & CardWidth & """ height=""" & CardHeight
+        & """ rx=""16"" fill=""" & BgColor
+        & """ stroke=""" & BorderColor & """ stroke-width=""1"" />"
+
+-------------------------------------------------
+-- SVG icon + KPI text + YoY
+-------------------------------------------------
+VAR SvgIcon =
+    "<g transform=""translate(" & IconPosX & "," & IconPosY & ") scale(" & IconScale & ")"">"
+        & "<path d='M220-60 80-200l140-140 57 56-44 44h494l-43-44 56-56 140 140L740-60l-57-56 44-44H233l43 44-56 56Zm260-460q-50 0-85-35t-35-85q0-50 35-85t85-35q50 0 85 35t35 85q0 50-35 85t-85 35ZM200-400q-33 0-56.5-23.5T120-480v-320q0-33 23.5-56.5T200-880h560q33 0 56.5 23.5T840-800v320q0 33-23.5 56.5T760-400H200Zm80-80h400q0-33 23.5-56.5T760-560v-160q-33 0-56.5-23.5T680-800H280q0 33-23.5 56.5T200-720v160q33 0 56.5 23.5T280-480Zm-80 0v-320 320Z'"
+        & " fill='#1D7044' />"
+        & "</g>"
+
+VAR SvgKPIVLU =
+    "<text x=""" & TextBlockX & """ y=""" & KPIVLUY
+        & """ text-anchor=""start"" fill=""" & TextPrimaryColor
+        & """ font-size=""40"" font-weight=""600"" font-family=""Segoe UI"">"
+        & KPIVLU & "</text>"
+
+VAR SvgKpiLabel =
+    "<text x=""" & TextBlockX & """ y=""" & KpiLabelY
+        & """ text-anchor=""start"" fill=""" & TextSecondaryColor
+        & """ font-size=""18"" font-family=""Segoe UI"">"
+        & KpiLabel & "</text>"
+
+VAR SvgYoYGroup =
+    "<g transform=""translate(" & TextBlockX & "," & YoYBaseY & ")"">"
+        & "<polygon points=""" & ArrowPoints & """ fill=""" & ArrowColor & """ />"
+        & "<text x=""30"" y=""4"" text-anchor=""start"" fill=""" & TextYoYColor
+        & """ font-size=""14"" font-family=""Segoe UI"">"
+        & YoYLabelText & "</text>"
+        & "</g>"
+
+VAR SvgFooter = "</svg>"
+
+RETURN
+    IF (
+        HasNoData,
+        BLANK (),
+        SvgHeader
+            & SvgBackground
+            & SvgIcon
+            & SvgKPIVLU
+            & SvgKpiLabel
+            & SvgYoYGroup
+            & SvgLineChart
+            & SvgFooter
+    )
