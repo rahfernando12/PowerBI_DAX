@@ -1,0 +1,25 @@
+CD_DD Filter = 
+VAR _datetable = SUMMARIZE('CD_Calendar','CD_Calendar'[Date],'CD_Calendar'[Day Month],'CD_Calendar'[Start of week],'CD_Calendar'[Month],'CD_Calendar'[Week Offset],CD_Calendar[Month Offset])
+VAR _today = TODAY()
+VAR _month = MONTH(TODAY())
+VAR _year = YEAR(TODAY())
+VAR _thismonthstart = DATE(_year,_month,1)
+VAR _thisyearstart = DATE(_year,1,1)
+VAR _lastmonthstart = EDATE(_thismonthstart,-1)
+VAR _lastmonthend = _thismonthstart-1  
+VAR _thisquarterstart = DATE(YEAR(_today),SWITCH(true,_month>9,10,_month>6,7,_month>3,4,1),1)
+
+RETURN UNION(
+    // ADDCOLUMNS(FILTER(_datetable,[Date]=_today),"Period","Today","Order",1),
+    ADDCOLUMNS(FILTER(_datetable,[Date]=_today-1),"Period","Yesterday","Order",2,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>=_today-2&&[Date]<_today),"Period","Last 2 Days","Order",3,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>=_today-7&&[Date]<_today),"Period","Last 7 Days","Order",4,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Week Offset]=-1),"Period","Last Week","Order",7,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>_today-14&&[Date]<_today),"Period","Last 14 Days","Order",5,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>=_today-30&&[Date]<_today),"Period","Last 30 Days","Order",6,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Week Offset]>=-6&&[Week Offset]<=-1),"Period","Last 6 Weeks","Order",8,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>=_lastmonthstart&&[Date]<=_lastmonthend),"Period","Last Month","Order",9,"DD","yes"),
+    ADDCOLUMNS(FILTER(_datetable,[Date]>=_today-5&&[Date]<_today),"Period","Last 5 days","Order",1,"DD","no"),
+    ADDCOLUMNS(FILTER(_datetable,[Week Offset]>=-5&&[Week Offset]<=-1),"Period","Last 5 Weeks","Order",2,"DD","no"),
+    ADDCOLUMNS(FILTER(_datetable,[Month Offset]>=-5&&[Month Offset]<=-1),"Period","Last 5 Months","Order",3,"DD","no")
+    )
