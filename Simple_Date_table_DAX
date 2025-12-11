@@ -1,0 +1,21 @@
+Calendar = ADDCOLUMNS (
+    CALENDAR(DATE(YEAR(TODAY()) - 4, 1, 1), DATE(YEAR(TODAY()), 12, 31)),
+    "Year", YEAR ( [Date] ),
+    "Quarter", "Q" & QUARTER ( [Date] ),
+    "Month", FORMAT ( [Date], "mmmm" ),
+    "Month Number", MONTH ( [Date] ),
+    "Day", FORMAT([Date], "dd"),
+    "Day Month", FORMAT([Date], "dd-mmm-yy"),
+    "Date Offset", DATEDIFF(TODAY(),[Date],DAY),
+    "Week Number", WEEKNUM([Date],2),
+    "Start of week", FORMAT([Date]-WEEKDAY([Date],3),"dd-mmm"),
+    "Month Year", format ([Date], "mmm-yy"),
+    "YM number", YEAR([Date])*100 + MONTH([Date]),
+    "Day of Week Name", FORMAT([Date],"ddd"),
+    "Month Offset", DATEDIFF(TODAY(),[Date],MONTH),
+    "Quarter-Year","Q" & QUARTER ( [Date] ) &"-"& FORMAT([Date],"yyyy"),
+    "QY Sort",FORMAT([Date],"yyyy")&QUARTER ( [Date] ),
+    "DoW Sort",WEEKDAY([Date],2),
+    "Year Offset", DATEDIFF(TODAY(),[Date],YEAR),
+    "Q-offset", DATEDIFF(TODAY(),[Date],QUARTER)
+     )
