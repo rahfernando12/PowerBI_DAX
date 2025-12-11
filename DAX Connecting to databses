@@ -1,0 +1,13 @@
+Teradata CONNECT:    
+
+    Source = Teradata.Database("[server]", [HierarchicalNavigation=true, Query=""]),
+
+
+ODBC CONNECT:
+	let
+	    Source = Oracle.Database("[server]", [HierarchicalNavigation=true, Query=" "])
+	- 
+	
+SNOWFLAKE CONNECT:
+	let
+	    Source = Value.NativeQuery(Snowflake.Databases("[server]","[db]"){[Name="[view]"]}[Data], "", null, [EnableFolding=true])
