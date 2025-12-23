@@ -1,0 +1,247 @@
+SVG Spider Web (Dynamic, 1–2 Years) = 
+/*
+Assumptions / wiring:
+- Date table has: Dim_Date[Year], 'Date'[MonthNumber] (1–12)
+- Your main series measure: [Radar Value]  (whatever you want plotted)
+- Month labels: we render "Jan..Dec" directly (Power BI-friendly and stable).
+  If you insist on a measure called [Month Short], swap MonthLabel below to that,
+  but it must return the correct label per MonthNumber when evaluated inside CALCULATE.
+
+Behavior:
+- Web axis auto-scales to the max across the visible series (and months).
+- Comparison line only shows when TWO years are selected in the Year filter.
+- Primary year = the larger (more recent) of the selected years when two are selected.
+*/
+
+VAR WebGrey   = "#D6D6D6"   -- lighter web
+VAR LabelGrey = "#7A7A7A"   -- month labels
+VAR Blue      = "#2F6FED"   -- main series
+VAR Blue2     = "#2F6FED"   -- comparison series (same shade; style differs via opacity/dash)
+
+VAR W = 320
+VAR H = 320
+VAR CX = 160
+VAR CY = 160
+VAR OuterR = 110
+
+-- Years selection
+VAR YearsTbl = VALUES ( Dim_Date[Year] )
+VAR YearCount = COUNTROWS ( YearsTbl )
+VAR ShowCompare = YearCount = 2
+
+VAR PrimaryYear =
+    IF ( YearCount >= 1, MAXX ( YearsTbl, Dim_Date[Year] ) )
+
+VAR CompareYear =
+    IF ( ShowCompare, MINX ( YearsTbl, Dim_Date[Year] ) )
+
+-- Month scaffold (12 points, starting at top, going clockwise)
+-- Angle: Jan = -90°, then +30° each month
+VAR Months =
+    DATATABLE (
+        "MonthNumber", INTEGER,
+        "AngleDeg", DOUBLE,
+        "MonthLabel", STRING,
+        {
+            { 1, -90, "Jan" }, { 2, -60, "Feb" }, { 3, -30, "Mar" }, { 4,   0, "Apr" },
+            { 5,  30, "May" }, { 6,  60, "Jun" }, { 7,  90, "Jul" }, { 8, 120, "Aug" },
+            { 9, 150, "Sep" }, {10, 180, "Oct" }, {11, 210, "Nov" }, {12, 240, "Dec" }
+        }
+    )
+
+-- Get per-month values for primary and (optional) compare
+VAR MonthVals =
+    ADDCOLUMNS (
+        Months,
+        "Val1",
+            VAR m = [MonthNumber]
+            RETURN
+                CALCULATE (
+                    [Sum Strikes],
+                    KEEPFILTERS ( Dim_Date[Year] = PrimaryYear ),
+                    KEEPFILTERS ( Dim_Date[Month Number] = m )
+                ),
+        "Val2",
+            VAR m2 = [MonthNumber]
+            RETURN
+                IF (
+                    ShowCompare,
+                    CALCULATE (
+                        [Sum Strikes],
+                        KEEPFILTERS ( Dim_Date[Year] = CompareYear ),
+                        KEEPFILTERS ( Dim_Date[Month Number] = m2 )
+                    )
+                )
+    )
+
+
+-- Dynamic axis scale = max across visible series (avoid divide-by-zero)
+VAR MaxVal1 = MAXX ( MonthVals, [Val1] )
+VAR MaxVal2 = IF ( ShowCompare, MAXX ( MonthVals, [Val2] ) )
+VAR AxisMax =
+    MAX ( 0.000001, MAX ( MaxVal1, IF ( ShowCompare, MaxVal2, 0 ) ) )
+
+-- Map values to radius
+VAR Points1 =
+    CONCATENATEX (
+        MonthVals,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR r = OuterR * DIVIDE ( [Val1], AxisMax )
+        VAR x = CX + r * COS ( ang )
+        VAR y = CY + r * SIN ( ang )
+        RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+        " ",
+        [MonthNumber],
+        ASC
+    )
+
+VAR Points1Closed = Points1 & " " & LEFT ( Points1, FIND ( " ", Points1 & " " ) - 1 )
+
+VAR Points2 =
+    IF (
+        ShowCompare,
+        CONCATENATEX (
+            MonthVals,
+            VAR ang = RADIANS ( [AngleDeg] )
+            VAR r = OuterR * DIVIDE ( [Val2], AxisMax )
+            VAR x = CX + r * COS ( ang )
+            VAR y = CY + r * SIN ( ang )
+            RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+            " ",
+            [MonthNumber],
+            ASC
+        )
+    )
+
+VAR Points2Closed =
+    IF ( ShowCompare, Points2 & " " & LEFT ( Points2, FIND ( " ", Points2 & " " ) - 1 ) )
+
+-- Month labels positioned slightly outside the outer ring
+VAR LabelsSvg =
+    CONCATENATEX (
+        Months,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR rLab = OuterR + 18
+        VAR lx = CX + rLab * COS ( ang )
+        VAR ly = CY + rLab * SIN ( ang )
+        VAR anchor =
+            SWITCH (
+                TRUE (),
+                [MonthNumber] = 1 || [MonthNumber] = 7, "middle",
+                [MonthNumber] IN { 2,3,4,5,6 }, "start",
+                "end"
+            )
+        RETURN
+            "<text x='" & FORMAT ( lx, "0.00" ) &
+            "' y='" & FORMAT ( ly, "0.00" ) &
+            "' font-family='Segoe UI' font-size='10' font-weight='600' fill='" & LabelGrey &
+            "' text-anchor='" & anchor & "'>" & [MonthLabel] & "</text>",
+        ""
+    )
+
+-- Web rings (25/50/75/100%) as polygons
+VAR RingsSvg =
+    CONCATENATEX (
+        DATATABLE ( "k", DOUBLE, { { 0.25 }, { 0.50 }, { 0.75 }, { 1.00 } } ),
+        VAR kk = [k]
+        VAR ringPts =
+            CONCATENATEX (
+                Months,
+                VAR ang = RADIANS ( [AngleDeg] )
+                VAR r = OuterR * kk
+                VAR x = CX + r * COS ( ang )
+                VAR y = CY + r * SIN ( ang )
+                RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+                " ",
+                [MonthNumber],
+                ASC
+            )
+        RETURN
+            "<polygon points='" & ringPts & "' fill='none' stroke='" & WebGrey & "' stroke-width='" &
+            IF ( kk = 1, "1.2", "1" ) & "'/>",
+        ""
+    )
+
+-- Spokes
+VAR SpokesSvg =
+    CONCATENATEX (
+        Months,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR x2 = CX + OuterR * COS ( ang )
+        VAR y2 = CY + OuterR * SIN ( ang )
+        RETURN
+            "<line x1='" & CX & "' y1='" & CY &
+            "' x2='" & FORMAT ( x2, "0.00" ) &
+            "' y2='" & FORMAT ( y2, "0.00" ) &
+            "' stroke='" & WebGrey & "' stroke-width='1'/>",
+        ""
+    )
+
+-- Markers (main and compare)
+VAR Markers1Svg =
+    CONCATENATEX (
+        MonthVals,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR r = OuterR * DIVIDE ( [Val1], AxisMax )
+        VAR x = CX + r * COS ( ang )
+        VAR y = CY + r * SIN ( ang )
+        RETURN "<circle cx='" & FORMAT ( x, "0.00" ) & "' cy='" & FORMAT ( y, "0.00" ) & "' r='3' fill='" & Blue & "'/>",
+        ""
+    )
+
+VAR Markers2Svg =
+    IF (
+        ShowCompare,
+        CONCATENATEX (
+            MonthVals,
+            VAR ang = RADIANS ( [AngleDeg] )
+            VAR r = OuterR * DIVIDE ( [Val2], AxisMax )
+            VAR x = CX + r * COS ( ang )
+            VAR y = CY + r * SIN ( ang )
+            RETURN "<circle cx='" & FORMAT ( x, "0.00" ) & "' cy='" & FORMAT ( y, "0.00" ) & "' r='3' fill='" & Blue2 & "' opacity='0.45'/>",
+            ""
+        )
+    )
+
+-- Optional subtle fill under main line
+VAR Area1Svg =
+    "<polygon points='" & Points1 & "' fill='" & Blue & "' opacity='0.12'/>"
+
+-- Series polylines
+VAR Line1Svg =
+    "<polyline points='" & Points1Closed &
+    "' fill='none' stroke='" & Blue & "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/>"
+
+VAR Line2Svg =
+    IF (
+        ShowCompare,
+        "<polyline points='" & Points2Closed &
+        "' fill='none' stroke='" & Blue2 &
+        "' opacity='0.45' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' stroke-dasharray='4 3'/>"
+    )
+
+VAR Svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='" & W & "' height='" & H & "' viewBox='0 0 " & W & " " & H & "'>" &
+      "<rect x='0' y='0' width='" & W & "' height='" & H & "' fill='#ffffff'/>" &
+      RingsSvg &
+      SpokesSvg &
+      LabelsSvg &
+      Area1Svg &
+      Line1Svg &
+      IF ( ShowCompare, Line2Svg, "" ) &
+      Markers1Svg &
+      IF ( ShowCompare, Markers2Svg, "" ) &
+    "</svg>"
+
+-- URL encoding for Power BI
+VAR EncodedSvg =
+    SUBSTITUTE (
+        SUBSTITUTE (
+            SUBSTITUTE ( Svg, "#", "%23" ),
+            " ", "%20"
+        ),
+        """", "%22"
+    )
+
+RETURN
+    "data:image/svg+xml;utf8," & EncodedSvg
