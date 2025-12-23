@@ -1,0 +1,101 @@
+SVG Profit vs Target Donut = 
+VAR RawVal = [Gross Profit vs Target %]   -- ratio (0–1+) or percent points (0–100+)
+
+-- Accept either 0–1.5 (fraction) or 0–100+ (percent points)
+VAR Pct =
+    IF ( NOT ISBLANK ( RawVal ) && RawVal <= 1.5, RawVal * 100, RawVal )
+
+VAR PctSafe = MAX ( 0, Pct )
+
+-- === Donut sizing ===
+VAR W = 75
+VAR H = 75
+VAR CX = 37.5
+VAR CY = 37.5
+VAR R  = 24
+VAR StrokeW = 4
+
+-- Circle math (circumference)
+VAR Circ = 2 * PI () * R
+
+-- Visual behavior:
+-- - arc is capped at 100% for the donut fill
+-- - we subtract a tiny "gap" so the arc never touches the 100% marker
+VAR FillPctCapped = MIN ( 100, PctSafe )
+VAR GapPct = 2.0   -- ~2% of the ring reserved as a visible gap near 100%
+VAR FillPctVisual =
+    MAX ( 0, MIN ( 100 - GapPct, FillPctCapped ) )
+
+VAR DashOffset = Circ * ( 1 - ( FillPctVisual / 100 ) )
+
+-- Colors (amber <100, blue =100, green >100)
+VAR _status =
+    SWITCH (
+        TRUE (),
+        PctSafe > 100, "over",
+        PctSafe = 100, "at",
+        "under"
+    )
+
+VAR ArcColor =
+    SWITCH (
+        _status,
+        "over",  "#2EAD52",   -- green
+        "at",    "#2F6FED",   -- blue
+        "#F4B000"             -- amber
+    )
+
+VAR LabelColor =
+    SWITCH (
+        _status,
+        "over",  "#1E7A38",   -- dark green
+        "at",    "#1F4FB8",   -- dark blue
+        "#C48A00"             -- dark amber
+    )
+
+-- Target marker (100%) light grey
+VAR TargetGrey = "#cfcfcf"
+
+-- Label (centered exactly)
+VAR LabelText = FORMAT ( ROUND ( PctSafe, 0 ), "0" ) & "%"
+
+-- Target marker position at top of ring
+VAR TargetDotR = 1.6
+VAR TargetDotX = CX
+VAR TargetDotY = CY - R
+
+-- Inner cutout radius (visual donut hole)
+VAR InnerR = 18
+
+VAR Svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='" & W & "' height='" & H & "' viewBox='0 0 " & W & " " & H & "'>" &
+      "<rect x='0' y='0' width='" & W & "' height='" & H & "' fill='#ffffff'/>" &
+
+      -- Track ring
+      "<circle cx='" & CX & "' cy='" & CY & "' r='" & R & "' fill='none' stroke='%23e6e6e6' stroke-width='" & StrokeW & "'/>" &
+
+      -- Target marker dot at 100% (top)
+      "<circle cx='" & TargetDotX & "' cy='" & TargetDotY & "' r='" & TargetDotR & "' fill='" & TargetGrey & "'/>" &
+
+      -- Progress arc (rotated so it starts at top)
+      "<circle cx='" & CX & "' cy='" & CY & "' r='" & R & "' fill='none' stroke='" & ArcColor & "' stroke-width='" & StrokeW & "'" &
+        " stroke-linecap='round' stroke-dasharray='" & FORMAT ( Circ, "0.00" ) & "'" &
+        " stroke-dashoffset='" & FORMAT ( DashOffset, "0.00" ) & "'" &
+        " transform='rotate(-90 " & CX & " " & CY & ")'/>" &
+
+      -- Inner cutout
+      "<circle cx='" & CX & "' cy='" & CY & "' r='" & InnerR & "' fill='#ffffff'/>" &
+
+      -- Center label (true center alignment)
+      "<text x='" & CX & "' y='" & CY & "' dy='0.35em' font-family='Segoe UI' font-size='14' fill='" & LabelColor & "'" &
+        " text-anchor='middle'>" &
+        LabelText &
+        "</text>"
+        &
+    "</svg>"
+
+-- URL-encode for Power BI image rendering
+
+
+RETURN
+    "data:image/svg+xml;utf8," & Svg
