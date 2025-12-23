@@ -1,0 +1,286 @@
+SVG Spider Web (Dynamic, 1–2 Years) = 
+VAR WebGrey   = "#D6D6D6"
+VAR LabelGrey = "#7A7A7A"
+VAR Blue      = "#2F6FED"
+VAR Red       = "#D94B4B"
+
+VAR W = 320
+VAR H = 362   -- a bit more room for legend + scale key
+VAR CX = 160
+VAR CY = 160
+VAR OuterR = 110
+
+-- Years selection
+VAR YearsTbl = VALUES ( Dim_Date[Year] )
+VAR YearCount = COUNTROWS ( YearsTbl )
+VAR ShowCompare = YearCount = 2
+
+VAR PrimaryYear =
+    IF ( YearCount >= 1, MAXX ( YearsTbl, Dim_Date[Year] ) )
+
+VAR CompareYear =
+    IF ( ShowCompare, MINX ( YearsTbl, Dim_Date[Year] ) )
+
+-- Month scaffold
+VAR Months =
+    DATATABLE (
+        "MonthNumber", INTEGER,
+        "AngleDeg", DOUBLE,
+        "MonthLabel", STRING,
+        {
+            { 1, -90, "Jan" }, { 2, -60, "Feb" }, { 3, -30, "Mar" }, { 4,   0, "Apr" },
+            { 5,  30, "May" }, { 6,  60, "Jun" }, { 7,  90, "Jul" }, { 8, 120, "Aug" },
+            { 9, 150, "Sep" }, {10, 180, "Oct" }, {11, 210, "Nov" }, {12, 240, "Dec" }
+        }
+    )
+
+-- Per-month values
+VAR MonthVals =
+    ADDCOLUMNS (
+        Months,
+        "Val1",
+            VAR m = [MonthNumber]
+            RETURN
+                CALCULATE (
+                    [Sum Strikes],
+                    KEEPFILTERS ( Dim_Date[Year] = PrimaryYear ),
+                    KEEPFILTERS ( Dim_Date[Month Number] = m )
+                ),
+        "Val2",
+            VAR m2 = [MonthNumber]
+            RETURN
+                IF (
+                    ShowCompare,
+                    CALCULATE (
+                        [Sum Strikes],
+                        KEEPFILTERS ( Dim_Date[Year] = CompareYear ),
+                        KEEPFILTERS ( Dim_Date[Month Number] = m2 )
+                    )
+                )
+    )
+
+-- Dynamic axis max
+VAR MaxVal1 = MAXX ( MonthVals, [Val1] )
+VAR MaxVal2 = IF ( ShowCompare, MAXX ( MonthVals, [Val2] ) )
+VAR AxisMaxRaw = MAX ( 0.000001, MAX ( MaxVal1, IF ( ShowCompare, MaxVal2, 0 ) ) )
+
+-- Nice rounding for axis key (outer ring) and step size
+-- This is where the max size of the ring is calculated
+VAR RingCount = 4
+VAR NiceAxisMax =
+    VAR p = POWER ( 10, INT ( LOG10 ( AxisMaxRaw ) ) )
+    VAR n = AxisMaxRaw / p
+    VAR m =
+        SWITCH (
+            TRUE (),
+            n <= 1, 1,
+            n <= 2, 2,
+            n <= 5, 3,
+            10
+        )
+    RETURN m*p
+
+VAR AxisMax = NiceAxisMax
+VAR StepVal = AxisMax / RingCount
+
+-- Points
+VAR Points1 =
+    CONCATENATEX (
+        MonthVals,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR r = OuterR * DIVIDE ( [Val1], AxisMax )
+        VAR x = CX + r * COS ( ang )
+        VAR y = CY + r * SIN ( ang )
+        RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+        " ",
+        [MonthNumber],
+        ASC
+    )
+VAR Points1Closed = Points1 & " " & LEFT ( Points1, FIND ( " ", Points1 & " " ) - 1 )
+
+VAR Points2 =
+    IF (
+        ShowCompare,
+        CONCATENATEX (
+            MonthVals,
+            VAR ang = RADIANS ( [AngleDeg] )
+            VAR r = OuterR * DIVIDE ( [Val2], AxisMax )
+            VAR x = CX + r * COS ( ang )
+            VAR y = CY + r * SIN ( ang )
+            RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+            " ",
+            [MonthNumber],
+            ASC
+        )
+    )
+VAR Points2Closed =
+    IF ( ShowCompare, Points2 & " " & LEFT ( Points2, FIND ( " ", Points2 & " " ) - 1 ) )
+
+-- Labels
+VAR LabelsSvg =
+    CONCATENATEX (
+        Months,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR rLab = OuterR + 18
+        VAR lx = CX + rLab * COS ( ang )
+        VAR ly = CY + rLab * SIN ( ang )
+        VAR anchor =
+            SWITCH (
+                TRUE (),
+                [MonthNumber] = 1 || [MonthNumber] = 7, "middle",
+                [MonthNumber] IN { 2, 3, 4, 5, 6 }, "start",
+                "end"
+            )
+        RETURN
+            "<text x='" & FORMAT ( lx, "0.00" ) &
+            "' y='" & FORMAT ( ly, "0.00" ) &
+            "' font-family='Segoe UI' font-size='10' font-weight='600' fill='" & LabelGrey &
+            "' text-anchor='" & anchor & "'>" & [MonthLabel] & "</text>",
+        ""
+    )
+
+-- Web rings
+VAR RingsSvg =
+    CONCATENATEX (
+        DATATABLE ( "k", DOUBLE, { { 0.25 }, { 0.50 }, { 0.75 }, { 1.00 } } ),
+        VAR kk = [k]
+        VAR ringPts =
+            CONCATENATEX (
+                Months,
+                VAR ang = RADIANS ( [AngleDeg] )
+                VAR r = OuterR * kk
+                VAR x = CX + r * COS ( ang )
+                VAR y = CY + r * SIN ( ang )
+                RETURN FORMAT ( x, "0.00" ) & "," & FORMAT ( y, "0.00" ),
+                " ",
+                [MonthNumber],
+                ASC
+            )
+        RETURN
+            "<polygon points='" & ringPts & "' fill='none' stroke='" & WebGrey & "' stroke-width='" &
+            IF ( kk = 1, "1.2", "1" ) & "'/>",
+        ""
+    )
+
+-- Spokes
+VAR SpokesSvg =
+    CONCATENATEX (
+        Months,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR x2 = CX + OuterR * COS ( ang )
+        VAR y2 = CY + OuterR * SIN ( ang )
+        RETURN
+            "<line x1='" & CX & "' y1='" & CY &
+            "' x2='" & FORMAT ( x2, "0.00" ) &
+            "' y2='" & FORMAT ( y2, "0.00" ) &
+            "' stroke='" & WebGrey & "' stroke-width='1'/>",
+        ""
+    )
+
+-- Tooltips via <title> on markers
+VAR Markers1Svg =
+    CONCATENATEX (
+        MonthVals,
+        VAR ang = RADIANS ( [AngleDeg] )
+        VAR r = OuterR * DIVIDE ( [Val1], AxisMax )
+        VAR x = CX + r * COS ( ang )
+        VAR y = CY + r * SIN ( ang )
+        VAR tip = [MonthLabel] & " " & PrimaryYear & ": " & FORMAT ( [Val1], "#,0.##" )
+        RETURN
+            "<circle cx='" & FORMAT ( x, "0.00" ) & "' cy='" & FORMAT ( y, "0.00" ) & "' r='3' fill='" & Blue & "'>" &
+              "<title>" & tip & "</title>" &
+            "</circle>",
+        ""
+    )
+
+VAR Markers2Svg =
+    IF (
+        ShowCompare,
+        CONCATENATEX (
+            MonthVals,
+            VAR ang = RADIANS ( [AngleDeg] )
+            VAR r = OuterR * DIVIDE ( [Val2], AxisMax )
+            VAR x = CX + r * COS ( ang )
+            VAR y = CY + r * SIN ( ang )
+            VAR tip = [MonthLabel] & " " & CompareYear & ": " & FORMAT ( [Val2], "#,0.##" )
+            RETURN
+                "<circle cx='" & FORMAT ( x, "0.00" ) & "' cy='" & FORMAT ( y, "0.00" ) & "' r='3' fill='" & Red & "' opacity='0.70'>" &
+                  "<title>" & tip & "</title>" &
+                "</circle>",
+            ""
+        )
+    )
+
+-- Main area + lines
+VAR Area1Svg =
+    "<polygon points='" & Points1 & "' fill='" & Blue & "' opacity='0.12'/>"
+
+VAR Line1Svg =
+    "<polyline points='" & Points1Closed &
+    "' fill='none' stroke='" & Blue & "' stroke-width='2' stroke-linejoin='round' stroke-linecap='round'/>"
+
+VAR Line2Svg =
+    IF (
+        ShowCompare,
+        "<polyline points='" & Points2Closed &
+        "' fill='none' stroke='" & Red &
+        "' opacity='0.80' stroke-width='2' stroke-linejoin='round' stroke-linecap='round' stroke-dasharray='4 3'/>"
+    )
+
+-- Legend + Scale Key (only when compare selected)
+-- Scale key (always shown)
+VAR ScaleSvg =
+    VAR y2 = 350
+    VAR KeyText =
+        "Scale: 0–" & FORMAT ( AxisMax, "#,0.##" ) &
+        " | Rings: " & FORMAT ( StepVal, "#,0.##" ) & " per step"
+    RETURN
+        "<text x='160' y='" & y2 & "' font-family='Segoe UI' font-size='9' fill='" & LabelGrey &
+        "' text-anchor='middle'>" & KeyText & "</text>"
+
+-- Legend (only if compare selected)
+VAR LegendSvg =
+    IF (
+        ShowCompare,
+        VAR y = 334
+        RETURN
+            "<g>" &
+              "<line x1='70' y1='" & y & "' x2='100' y2='" & y & "' stroke='" & Blue & "' stroke-width='2'/>" &
+              "<circle cx='85' cy='" & y & "' r='3' fill='" & Blue & "'/>" &
+              "<text x='106' y='" & ( y + 4 ) & "' font-family='Segoe UI' font-size='10' fill='" & LabelGrey & "'>" &
+                FORMAT ( PrimaryYear, "0" ) &
+              "</text>" &
+              "<line x1='160' y1='" & y & "' x2='190' y2='" & y & "' stroke='" & Red & "' stroke-width='2' stroke-dasharray='4 3'/>" &
+              "<circle cx='175' cy='" & y & "' r='3' fill='" & Red & "' opacity='0.70'/>" &
+              "<text x='196' y='" & ( y + 4 ) & "' font-family='Segoe UI' font-size='10' fill='" & LabelGrey & "'>" &
+                FORMAT ( CompareYear, "0" ) &
+              "</text>" &
+            "</g>"
+    )
+
+VAR Svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='" & W & "' height='" & H & "' viewBox='0 0 " & W & " " & H & "'>" &
+      "<rect x='0' y='0' width='" & W & "' height='" & H & "' fill='#ffffff'/>" &
+      RingsSvg &
+      SpokesSvg &
+      LabelsSvg &
+      Area1Svg &
+      Line1Svg &
+      IF ( ShowCompare, Line2Svg, "" ) &
+      Markers1Svg &
+      IF ( ShowCompare, Markers2Svg, "" ) &
+      ScaleSvg &
+      IF ( ShowCompare, LegendSvg, "" ) &
+    "</svg>"
+
+VAR EncodedSvg =
+    SUBSTITUTE (
+        SUBSTITUTE (
+            SUBSTITUTE ( Svg, "#", "%23" ),
+            " ", "%20"
+        ),
+        """", "%22"
+    )
+
+RETURN
+    "data:image/svg+xml;utf8," & EncodedSvg
