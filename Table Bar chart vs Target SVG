@@ -1,0 +1,118 @@
+SVG Profit vs Target Bar = 
+VAR RawVal = [Gross Profit vs Target %]
+
+-- Accept either 0–1 (fraction) or 0–100+ (percent points)
+VAR Pct =
+    IF ( NOT ISBLANK ( RawVal ) && RawVal <= 1.5, RawVal * 100, RawVal )
+
+VAR PctSafe = MAX ( 0, Pct )
+
+-- ======================================================
+-- 1) Focused scale for visibility around 90–110
+--    Map 80–120 to full bar width (zoomed axis)
+-- ======================================================
+VAR AxisMin = 80
+VAR AxisMax = 120
+VAR AxisSpan = AxisMax - AxisMin
+
+VAR PctClamped = MIN ( AxisMax, MAX ( AxisMin, PctSafe ) )
+VAR PosPct = DIVIDE ( PctClamped - AxisMin, AxisSpan )   -- 0..1 across the track
+
+-- ======================================================
+-- Size: exact fit for 150×25 with 1px padding
+-- ======================================================
+VAR W = 150
+VAR H = 30
+VAR Pad = 1
+
+VAR TrackX = Pad
+VAR TrackW = W - ( 2 * Pad )
+VAR TrackH = 10
+VAR TrackRX = 3
+VAR TrackY = INT ( ( H - TrackH ) / 2 )+5
+
+-- Fill geometry on zoomed axis
+VAR FillW = ROUND ( PosPct * TrackW, 0 )
+
+-- End-cap (darker)
+VAR CapW = 4
+VAR CapX = TrackX + MAX ( FillW - CapW, 0 )
+
+-- Target marker at 100% on the zoomed axis
+VAR TargetPosPct = DIVIDE ( 100 - AxisMin, AxisSpan )
+VAR TargetX = TrackX + ROUND ( TargetPosPct * TrackW, 0 )
+
+VAR TriHalfW = 2.5
+VAR TriTipY = TrackY
+VAR TriBaseY = MAX ( Pad, TrackY - 5 )
+
+-- Labels
+VAR LabelText = FORMAT ( ROUND ( PctSafe, 0 ), "0" ) & "%"
+VAR ValueLabelX = W
+VAR ValueLabelY = TrackY + TrackH
+
+-- Colors
+VAR _status =
+    SWITCH (
+        TRUE (),
+        PctSafe > 100, "over",
+        PctSafe = 100, "at",
+        "under"
+    )
+
+VAR BarColor =
+    SWITCH (
+        _status,
+        "over",  "#2EAD52",   -- green
+        "at",    "#2F6FED",   -- blue
+        "#F4B000"             -- amber
+    )
+
+VAR CapColor =
+    SWITCH (
+        _status,
+        "over",  "#1E7A38",   -- dark green
+        "at",    "#1F4FB8",   -- dark blue
+        "#C48A00"             -- dark amber
+    )
+
+-- 2) Value label color: dark shade of line colour
+VAR ValueLabelColor = CapColor
+
+-- 3) Target marker color: light grey
+VAR TargetGrey = "#cfcfcf"
+
+VAR Svg =
+    "<svg xmlns='http://www.w3.org/2000/svg' width='" & W & "' height='" & H & "' viewBox='0 0 " & W & " " & H & "'>" &
+      "<rect x='0' y='0' width='" & W & "' height='" & H & "' fill='#ffffff'/>" &
+      "<rect x='" & TrackX & "' y='" & TrackY & "' width='" & TrackW & "' height='" & TrackH & "' rx='" & TrackRX & "' fill='#e6e6e6'/>" &
+
+      IF ( FillW > 0,
+          "<rect x='" & TrackX & "' y='" & TrackY & "' width='" & FillW & "' height='" & TrackH & "' rx='" & TrackRX & "' fill='" & BarColor & "'/>",
+          ""
+      ) &
+      IF ( FillW > 0,
+          "<rect x='" & CapX & "' y='" & TrackY & "' width='" & MIN ( CapW, FillW ) & "' height='" & TrackH & "' rx='2' fill='" & CapColor & "'/>",
+          ""
+      ) &
+
+      -- Target marker + label (fixed at 100% position on zoomed axis)
+      "<polygon points='" &
+        TargetX & "," & TriBaseY & " " &
+        ( TargetX - TriHalfW ) & "," & TriTipY & " " &
+        ( TargetX + TriHalfW ) & "," & TriTipY &
+      "' fill='" & TargetGrey & "'/>" &
+      "<text x='" & TargetX & "' y='" & ( TriBaseY - 1 ) & "' font-family='Segoe UI' font-size='12' fill='" & TargetGrey & "' text-anchor='middle'>100%</text>" &
+
+      -- Value label (right edge, dark shade of bar colour)
+      "<text x='" & ValueLabelX & "' y='" & ValueLabelY & "' font-family='Segoe UI' font-size='12' fill='" & ValueLabelColor & "' text-anchor='end'>" &
+        LabelText &
+      "</text>" &
+    "</svg>"
+
+VAR EncodedSvg =
+ Svg
+ 
+
+RETURN
+    "data:image/svg+xml;utf8," & EncodedSvg
